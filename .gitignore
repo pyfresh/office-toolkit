@@ -1,0 +1,37 @@
+# Build artifacts
+build/
+dist/
+*.spec
+__pycache__/
+*.pyc
+
+# Virtual environment
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp.pdf
+*.tmp
+
+# User data (personal PDFs and images)
+Y_*.pdf
+Transcript*.pdf
+merged_output*.pdf
+*.jpg
+*.jpeg
+*.png
+*.bmp
+
+# Claude
+.claude/
+
+# Misc
+dist.zip
