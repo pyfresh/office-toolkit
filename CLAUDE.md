@@ -18,7 +18,7 @@ Windows 桌面 PDF 工具，提供合并与编辑两大功能模块，PySide6 GU
 
 ```
 办公工具箱/
-├── pdf_merger_gui.py   # 唯一源码文件
+├── office_toolkit.py   # 唯一源码文件
 ├── icon.ico            # 应用图标
 ├── requirements.txt    # Python 依赖
 ├── README.md           # GitHub 项目说明
@@ -30,7 +30,7 @@ Windows 桌面 PDF 工具，提供合并与编辑两大功能模块，PySide6 GU
     └── 办公工具箱.exe    # 打包产物 (107 MB)
 ```
 
-## 源码架构 (pdf_merger_gui.py)
+## 源码架构 (office_toolkit.py)
 
 ```
 MainWindow
@@ -79,7 +79,7 @@ pyinstaller --onefile --windowed --name "办公工具箱" \
   --icon=icon.ico --add-data "icon.ico;." \
   --hidden-import PySide6 --hidden-import PIL --hidden-import pypdf \
   --hidden-import fitz --hidden-import PIL._tkinter_finder \
-  pdf_merger_gui.py
+  office_toolkit.py
 ```
 
 ## 注意事项
