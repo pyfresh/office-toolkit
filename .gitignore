@@ -17,21 +17,9 @@ venv/
 .DS_Store
 Thumbs.db
 
-# Temporary files
-*.tmp.pdf
+# Temporary
 *.tmp
-
-# User data (personal PDFs and images)
-Y_*.pdf
-Transcript*.pdf
-merged_output*.pdf
-*.jpg
-*.jpeg
-*.png
-*.bmp
+*.tmp.pdf
 
 # Claude
 .claude/
-
-# Misc
-dist.zip
