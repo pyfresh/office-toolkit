@@ -1,5 +1,5 @@
 """
-PDF 工具箱 - PySide6 现代化界面
+办公工具箱 - PySide6 现代化界面
 - 合并：拖拽文件合并为 PDF
 - 编辑：预览、删除、插入 PDF 页面
 """
@@ -1096,7 +1096,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("PDF 工具箱")
+        self.setWindowTitle("办公工具箱")
         self.setWindowIcon(QIcon(_get_icon_path()))
         self.resize(900, 650)
         self.setMinimumSize(700, 500)
@@ -1125,7 +1125,7 @@ class MainWindow(QMainWindow):
         nav_layout.setContentsMargins(16, 0, 16, 0)
         nav_layout.setSpacing(0)
 
-        title = QLabel("📄 PDF 工具箱")
+        title = QLabel("📄 办公工具箱")
         title.setStyleSheet(
             "font-size: 16px; font-weight: bold; color: #303133; border: none; padding-right: 24px;"
         )
@@ -1197,9 +1197,9 @@ def _get_icon_path():
 
 if __name__ == "__main__":
     if sys.platform == "win32":
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("PDF工具箱")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("办公工具箱")
     app = QApplication(sys.argv)
-    app.setApplicationName("PDF工具箱")
+    app.setApplicationName("办公工具箱")
     icon_path = _get_icon_path()
     app_icon = QIcon(icon_path)
     app.setWindowIcon(app_icon)
