@@ -1,7 +1,6 @@
 """
 办公工具箱 - PySide6 现代化界面
-- 合并：拖拽文件合并为 PDF
-- 编辑：预览、删除、插入 PDF 页面
+- 编辑：预览、拖拽排序、插入、删除、导出 PDF 页面（支持 PDF + 图片）
 """
 
 import ctypes
@@ -38,16 +37,12 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QListWidget,
-    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
-    QSplitter,
-    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -66,17 +61,6 @@ QFrame#dropZone {
 }
 QFrame#dropZone:hover { border-color: #409eff; background-color: #ecf5ff; }
 QLabel#dropLabel { color: #909399; font-size: 14px; }
-QListWidget {
-    background-color: #ffffff; border: 1px solid #e4e7ed;
-    border-radius: 6px; padding: 4px; outline: none; font-size: 13px;
-}
-QListWidget::item {
-    background-color: #ffffff; border: 1px solid #ebeef5;
-    border-radius: 5px; padding: 8px 12px; margin: 2px 0px; color: #303133;
-}
-QListWidget::item:selected {
-    background-color: #ecf5ff; border-color: #409eff; color: #409eff;
-}
 QPushButton {
     background-color: #ffffff; border: 1px solid #dcdfe6;
     border-radius: 6px; padding: 8px 20px; font-size: 13px; color: #606266;
@@ -89,13 +73,6 @@ QPushButton#primaryBtn {
 QPushButton#primaryBtn:hover { background-color: #66b1ff; }
 QPushButton#primaryBtn:pressed { background-color: #3a8ee6; }
 QPushButton#primaryBtn:disabled { background-color: #a0cfff; }
-QPushButton#navBtn {
-    background: transparent; border: none; border-radius: 0;
-    padding: 10px 32px; font-size: 15px; font-weight: bold; color: #909399;
-    border-bottom: 2px solid transparent;
-}
-QPushButton#navBtn:hover { color: #409eff; background: transparent; }
-QPushButton#navBtn[active="true"] { color: #409eff; border-bottom: 2px solid #409eff; }
 QProgressBar {
     border: none; border-radius: 4px; background-color: #e4e7ed;
     height: 6px; text-align: center; font-size: 12px;
@@ -278,44 +255,6 @@ class ThumbnailWidget(QFrame):
 # ==================== 工作线程 ====================
 
 
-class MergeWorker(QThread):
-    progress = Signal(int)
-    finished = Signal(str)
-    error = Signal(str)
-
-    def __init__(self, files, output_path):
-        super().__init__()
-        self.files = files
-        self.output_path = output_path
-
-    def run(self):
-        try:
-            writer = PdfWriter()
-            total = len(self.files)
-            for i, (_, fpath) in enumerate(self.files):
-                ext = os.path.splitext(fpath)[1].lower()
-                if ext == ".pdf":
-                    for page in PdfReader(fpath).pages:
-                        writer.add_page(page)
-                else:
-                    img = Image.open(fpath)
-                    if img.mode == "RGBA":
-                        img = img.convert("RGB")
-                    if img.mode != "RGB":
-                        img = img.convert("RGB")
-                    tmp = fpath + ".tmp.pdf"
-                    img.save(tmp)
-                    for page in PdfReader(tmp).pages:
-                        writer.add_page(page)
-                    os.remove(tmp)
-                self.progress.emit(int((i + 1) / total * 100))
-            writer.write(self.output_path)
-            writer.close()
-            self.finished.emit(self.output_path)
-        except Exception as e:
-            self.error.emit(str(e))
-
-
 class ExportWorker(QThread):
     """后台导出编辑后的 PDF"""
 
@@ -355,265 +294,6 @@ class ExportWorker(QThread):
             self.error.emit(str(e))
 
 
-# ==================== 拖拽列表 ====================
-
-
-class DropListWidget(QListWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAcceptDrops(True)
-        self.setDragDropMode(QListWidget.DragDropMode.InternalMove)
-        self.setDefaultDropAction(Qt.DropAction.MoveAction)
-        self.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
-
-    def dragEnterEvent(self, event: QDragEnterEvent):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            super().dragEnterEvent(event)
-
-    def dropEvent(self, event: QDropEvent):
-        if event.mimeData().hasUrls():
-            paths = [url.toLocalFile() for url in event.mimeData().urls()]
-            main_win = self.window()
-            if isinstance(main_win, MainWindow):
-                main_win.add_merge_files(paths)
-            event.acceptProposedAction()
-        else:
-            super().dropEvent(event)
-
-
-# ==================== 合并页面 ====================
-
-
-class MergePage(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.files = []
-        self._build_ui()
-
-    def _build_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(10)
-
-        # 拖拽区域
-        self.drop_zone = QFrame(objectName="dropZone")
-        self.drop_zone.setFixedHeight(90)
-        self.drop_zone.setAcceptDrops(True)
-        dz_layout = QVBoxLayout(self.drop_zone)
-        dz_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.drop_label = QLabel(
-            "拖拽 PDF / 图片文件到此处\n或点击下方按钮选择文件",
-            objectName="dropLabel",
-            alignment=Qt.AlignmentFlag.AlignCenter,
-        )
-        dz_layout.addWidget(self.drop_label)
-        layout.addWidget(self.drop_zone)
-        self.drop_zone.dragEnterEvent = self._zone_drag_enter
-        self.drop_zone.dropEvent = self._zone_drop
-
-        # 按钮行
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
-        self.btn_add = QPushButton("📂 选择文件")
-        self.btn_add.clicked.connect(self._browse_files)
-        self.btn_folder = QPushButton("📁 添加文件夹")
-        self.btn_folder.clicked.connect(self._add_folder)
-        btn_row.addWidget(self.btn_add)
-        btn_row.addWidget(self.btn_folder)
-        btn_row.addStretch()
-        layout.addLayout(btn_row)
-
-        # 文件列表
-        label = QLabel("文件列表（拖拽条目可调整顺序）")
-        label.setStyleSheet("color: #606266; font-size: 13px; font-weight: bold;")
-        layout.addWidget(label)
-
-        self.list_widget = DropListWidget()
-        self.list_widget.model().rowsMoved.connect(self._on_rows_moved)
-        layout.addWidget(self.list_widget, stretch=1)
-
-        # 操作按钮
-        op_row = QHBoxLayout()
-        op_row.setSpacing(6)
-
-        self.btn_up = QPushButton("⬆ 上移")
-        self.btn_up.clicked.connect(self._move_up)
-        self.btn_down = QPushButton("⬇ 下移")
-        self.btn_down.clicked.connect(self._move_down)
-        self.btn_remove = QPushButton("✕ 移除")
-        self.btn_remove.clicked.connect(self._remove_selected)
-        self.btn_clear = QPushButton("清空")
-        self.btn_clear.clicked.connect(self._clear_all)
-
-        op_row.addWidget(self.btn_up)
-        op_row.addWidget(self.btn_down)
-        op_row.addWidget(self.btn_remove)
-        op_row.addWidget(self.btn_clear)
-        op_row.addStretch()
-
-        self.btn_merge = QPushButton("合并导出 PDF", objectName="primaryBtn")
-        self.btn_merge.clicked.connect(self._start_merge)
-        op_row.addWidget(self.btn_merge)
-        layout.addLayout(op_row)
-
-        # 进度条
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        self.progress_bar.setFixedHeight(6)
-        layout.addWidget(self.progress_bar)
-
-    # === 拖拽 ===
-    def _zone_drag_enter(self, event: QDragEnterEvent):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-            self.drop_zone.setStyleSheet(
-                "#dropZone { background-color: #ecf5ff; border: 2px dashed #409eff; border-radius: 10px; }"
-            )
-
-    def _zone_drop(self, event: QDropEvent):
-        self.drop_zone.setStyleSheet("")
-        if event.mimeData().hasUrls():
-            paths = [url.toLocalFile() for url in event.mimeData().urls()]
-            self.add_files(paths)
-            event.acceptProposedAction()
-
-    # === 文件操作 ===
-    def add_files(self, paths):
-        added = 0
-        for p in paths:
-            p = str(p).strip('"').strip("{").strip("}")
-            ext = os.path.splitext(p)[1].lower()
-            if ext in SUPPORTED_EXTS and os.path.isfile(p):
-                if not any(p == fp for _, fp in self.files):
-                    self.files.append((os.path.basename(p), p))
-                    item = QListWidgetItem(os.path.basename(p))
-                    item.setToolTip(p)
-                    self.list_widget.addItem(item)
-                    added += 1
-        if added:
-            MainWindow.set_status(f"已添加 {added} 个文件，共 {len(self.files)} 个")
-
-    def _on_rows_moved(self, parent, start, end, dest, row):
-        new_files = []
-        for i in range(self.list_widget.count()):
-            fname = self.list_widget.item(i).text()
-            for name, path in self.files:
-                if name == fname and not any(path == p for _, p in new_files):
-                    new_files.append((name, path))
-                    break
-        for n, p in self.files:
-            if not any(p == fp for _, fp in new_files):
-                new_files.append((n, p))
-        self.files = new_files
-
-    def _browse_files(self):
-        paths, _ = QFileDialog.getOpenFileNames(
-            self,
-            "选择文件",
-            "",
-            "支持的文件 (*.pdf *.jpg *.jpeg *.png *.bmp *.gif *.tiff *.webp);;PDF (*.pdf);;图片 (*.jpg *.jpeg *.png *.bmp)",
-        )
-        if paths:
-            self.add_files(paths)
-
-    def _add_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "选择文件夹")
-        if not folder:
-            return
-        files = []
-        for f in sorted(os.listdir(folder)):
-            if os.path.splitext(f)[1].lower() in SUPPORTED_EXTS:
-                files.append(os.path.join(folder, f))
-        if files:
-            self.add_files(files)
-        else:
-            QMessageBox.information(self, "提示", "该文件夹内没有支持的文件。")
-
-    def _remove_selected(self):
-        rows = sorted(
-            [self.list_widget.row(item) for item in self.list_widget.selectedItems()],
-            reverse=True,
-        )
-        for r in rows:
-            self.list_widget.takeItem(r)
-            del self.files[r]
-        MainWindow.set_status(f"剩余 {len(self.files)} 个文件")
-
-    def _clear_all(self):
-        self.list_widget.clear()
-        self.files.clear()
-        MainWindow.set_status("列表已清空")
-
-    def _move_up(self):
-        row = self.list_widget.currentRow()
-        if row <= 0:
-            return
-        self.files[row], self.files[row - 1] = self.files[row - 1], self.files[row]
-        item = self.list_widget.takeItem(row)
-        self.list_widget.insertItem(row - 1, item)
-        self.list_widget.setCurrentRow(row - 1)
-
-    def _move_down(self):
-        row = self.list_widget.currentRow()
-        if row < 0 or row >= self.list_widget.count() - 1:
-            return
-        self.files[row], self.files[row + 1] = self.files[row + 1], self.files[row]
-        item = self.list_widget.takeItem(row)
-        self.list_widget.insertItem(row + 1, item)
-        self.list_widget.setCurrentRow(row + 1)
-
-    def _start_merge(self):
-        if not self.files:
-            QMessageBox.warning(self, "提示", "请先添加要合并的文件。")
-            return
-        default_name = (
-            (os.path.splitext(self.files[0][0])[0] + "_合并.pdf")
-            if self.files
-            else "merged_output.pdf"
-        )
-        output, _ = QFileDialog.getSaveFileName(
-            self, "保存合并后的 PDF", default_name, "PDF 文件 (*.pdf)"
-        )
-        if not output:
-            return
-
-        self.btn_merge.setEnabled(False)
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setValue(0)
-        MainWindow.set_status("正在合并...")
-
-        self.worker = MergeWorker(self.files, output)
-        self.worker.progress.connect(
-            lambda v: (
-                self.progress_bar.setValue(v),
-                MainWindow.set_status(f"合并中... {v}%"),
-            )
-        )
-        self.worker.finished.connect(self._on_merge_done)
-        self.worker.error.connect(self._on_merge_error)
-        self.worker.start()
-
-    def _on_merge_done(self, output):
-        self.progress_bar.setVisible(False)
-        self.btn_merge.setEnabled(True)
-        MainWindow.set_status("合并完成")
-        if (
-            QMessageBox.question(
-                self, "完成", f"PDF 已导出到：\n{output}\n\n是否打开文件？"
-            )
-            == QMessageBox.StandardButton.Yes
-        ):
-            os.startfile(output)
-
-    def _on_merge_error(self, msg):
-        self.progress_bar.setVisible(False)
-        self.btn_merge.setEnabled(True)
-        MainWindow.set_status("合并失败")
-        QMessageBox.critical(self, "错误", f"合并过程中出错：\n{msg}")
-
-
 # ==================== 编辑页面 ====================
 
 
@@ -647,7 +327,7 @@ class EditPage(QWidget):
         dz_layout = QVBoxLayout(self.drop_zone)
         dz_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.drop_label = QLabel(
-            "拖拽 PDF 文件到此处打开\n或点击按钮选择文件",
+            "拖拽 PDF / 图片文件到此处\n或点击按钮选择文件",
             objectName="dropLabel",
             alignment=Qt.AlignmentFlag.AlignCenter,
         )
@@ -658,13 +338,13 @@ class EditPage(QWidget):
 
         btn_vert = QVBoxLayout()
         btn_vert.setSpacing(4)
-        self.btn_open = QPushButton("📂 打开 PDF")
-        self.btn_open.clicked.connect(self._open_pdf)
-        self.btn_insert = QPushButton("📎 插入文件")
-        self.btn_insert.clicked.connect(self._insert_file)
-        self.btn_insert.setEnabled(False)
-        btn_vert.addWidget(self.btn_open)
-        btn_vert.addWidget(self.btn_insert)
+        self.btn_add = QPushButton("📂 添加文件")
+        self.btn_add.clicked.connect(self._add_files)
+        self.btn_clear = QPushButton("🗑 清空")
+        self.btn_clear.clicked.connect(self._clear_document)
+        self.btn_clear.setEnabled(False)
+        btn_vert.addWidget(self.btn_add)
+        btn_vert.addWidget(self.btn_clear)
         top_area.addLayout(btn_vert)
         layout.addLayout(top_area)
 
@@ -691,7 +371,7 @@ class EditPage(QWidget):
 
         # 空状态
         self.empty_label = QLabel(
-            "请先打开一个 PDF 文件", alignment=Qt.AlignmentFlag.AlignCenter
+            "拖拽文件到此处或点击「添加文件」开始", alignment=Qt.AlignmentFlag.AlignCenter
         )
         self.empty_label.setStyleSheet(
             "color: #c0c4cc; font-size: 16px; padding: 60px;"
@@ -753,11 +433,7 @@ class EditPage(QWidget):
         if event.mimeData().hasUrls():
             paths = [url.toLocalFile() for url in event.mimeData().urls()]
             if paths:
-                ext = os.path.splitext(paths[0])[1].lower()
-                if ext == ".pdf" and not self.pages:
-                    self._load_pdf(paths[0])
-                elif self.pages:
-                    self._insert_paths(paths, len(self.pages))
+                self._insert_paths(paths, len(self.pages))
             event.acceptProposedAction()
 
     # === 缩略图拖拽排序 ===
@@ -823,7 +499,7 @@ class EditPage(QWidget):
             geo = w.geometry()
             if pos.y() < geo.bottom():
                 if pos.y() >= geo.top():
-                    # Same row: left half → insert before this page; right half → keep going
+                    # Same row: left half -> insert before this page; right half -> keep going
                     if pos.x() < geo.center().x():
                         target = w.page_num
                         break
@@ -856,47 +532,27 @@ class EditPage(QWidget):
         self.drop_indicator.show()
         self.drop_indicator.raise_()
 
-    # === 打开/加载 PDF ===
-    def _open_pdf(self):
-        if self.pages:
-            self.pages.clear()
-            self.selected_indices.clear()
-            self._refresh_thumbnails()
-            self.btn_open.setText("📂 打开 PDF")
-            self.btn_export.setEnabled(False)
-            self.btn_insert.setEnabled(False)
-            self.btn_delete.setEnabled(False)
-            self.btn_clear_sel.setEnabled(False)
-            self.empty_label.setVisible(True)
-            self.drop_label.setText("拖拽 PDF 文件到此处打开\n或点击按钮选择文件")
-            MainWindow.set_status("页面已清空")
-            return
-        path, _ = QFileDialog.getOpenFileName(
-            self, "选择 PDF 文件", "", "PDF 文件 (*.pdf)"
+    # === 添加文件 ===
+    def _add_files(self):
+        """添加文件（追加到末尾）"""
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "选择文件", "",
+            "支持的文件 (*.pdf *.jpg *.jpeg *.png *.bmp *.gif *.tiff *.webp);;PDF (*.pdf);;图片 (*.jpg *.jpeg *.png *.bmp)"
         )
-        if path:
-            self._load_pdf(path)
+        if paths:
+            self._insert_paths(paths, len(self.pages))
 
-    def _load_pdf(self, path):
-        try:
-            doc = fitz.open(path)
-            page_count = doc.page_count
-            doc.close()
-
-            self.pages = [PageEntry("pdf", path, i) for i in range(page_count)]
-            self.selected_indices.clear()
-            self._refresh_thumbnails()
-
-            self.empty_label.setVisible(False)
-            self.btn_export.setEnabled(True)
-            self.btn_insert.setEnabled(True)
-            self.btn_open.setText("🗑 清空所有页面")
-            self.drop_label.setText(
-                f"已加载：{os.path.basename(path)} （{page_count} 页）\n可拖入文件插入到末尾"
-            )
-            MainWindow.set_status(f"已加载 {page_count} 页")
-        except Exception as e:
-            QMessageBox.critical(self, "错误", f"无法打开 PDF：\n{e}")
+    def _clear_document(self):
+        self.pages.clear()
+        self.selected_indices.clear()
+        self._refresh_thumbnails()
+        self.btn_export.setEnabled(False)
+        self.btn_clear.setEnabled(False)
+        self.btn_delete.setEnabled(False)
+        self.btn_clear_sel.setEnabled(False)
+        self.empty_label.setVisible(True)
+        self.drop_label.setText("拖拽 PDF / 图片文件到此处\n或点击按钮选择文件")
+        MainWindow.set_status("页面已清空")
 
     # === 缩略图 ===
     def _on_resize_timeout(self):
@@ -914,7 +570,7 @@ class EditPage(QWidget):
 
         if not self.pages:
             self.empty_label = QLabel(
-                "请先打开一个 PDF 文件", alignment=Qt.AlignmentFlag.AlignCenter
+                "拖拽文件到此处或点击「添加文件」开始", alignment=Qt.AlignmentFlag.AlignCenter
             )
             self.empty_label.setStyleSheet(
                 "color: #c0c4cc; font-size: 16px; padding: 60px;"
@@ -979,10 +635,9 @@ class EditPage(QWidget):
         self.btn_clear_sel.setEnabled(False)
         if not self.pages:
             self.btn_export.setEnabled(False)
-            self.btn_insert.setEnabled(False)
-            self.btn_open.setText("📂 打开 PDF")
+            self.btn_clear.setEnabled(False)
             self.empty_label.setVisible(True)
-            self.drop_label.setText("拖拽 PDF 文件到此处打开\n或点击按钮选择文件")
+            self.drop_label.setText("拖拽 PDF / 图片文件到此处\n或点击按钮选择文件")
 
     # === 插入 ===
     def _on_insert_requested(self, position):
@@ -994,17 +649,6 @@ class EditPage(QWidget):
         )
         if paths:
             self._insert_paths(paths, position)
-
-    def _insert_file(self):
-        """在末尾插入"""
-        paths, _ = QFileDialog.getOpenFileNames(
-            self,
-            "选择要插入的文件",
-            "",
-            "支持的文件 (*.pdf *.jpg *.jpeg *.png *.bmp *.gif *.tiff *.webp);;PDF (*.pdf);;图片 (*.jpg *.jpeg *.png *.bmp)",
-        )
-        if paths:
-            self._insert_paths(paths, len(self.pages))
 
     def _insert_paths(self, paths, position):
         new_entries = []
@@ -1025,9 +669,17 @@ class EditPage(QWidget):
             else:
                 new_entries.append(PageEntry("image", p, 0))
 
+        was_empty = not self.pages
         position = min(position, len(self.pages))
         self.pages[position:position] = new_entries
         self._refresh_thumbnails()
+        if was_empty and self.pages:
+            self.empty_label.setVisible(False)
+            self.btn_export.setEnabled(True)
+            self.btn_clear.setEnabled(True)
+            self.drop_label.setText(
+                f"已加载 {len(self.pages)} 页\n可继续拖入文件追加"
+            )
         MainWindow.set_status(f"已插入 {len(new_entries)} 页，共 {len(self.pages)} 页")
 
     # === 导出 ===
@@ -1116,44 +768,25 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # ---- 导航栏 ----
-        nav_bar = QWidget()
-        nav_bar.setStyleSheet(
+        # ---- 标题栏 ----
+        title_bar = QWidget()
+        title_bar.setStyleSheet(
             "background-color: #ffffff; border-bottom: 1px solid #e4e7ed;"
         )
-        nav_layout = QHBoxLayout(nav_bar)
-        nav_layout.setContentsMargins(16, 0, 16, 0)
-        nav_layout.setSpacing(0)
+        tb_layout = QHBoxLayout(title_bar)
+        tb_layout.setContentsMargins(16, 8, 16, 8)
 
         title = QLabel("📄 办公工具箱")
         title.setStyleSheet(
-            "font-size: 16px; font-weight: bold; color: #303133; border: none; padding-right: 24px;"
+            "font-size: 16px; font-weight: bold; color: #303133; border: none;"
         )
-        nav_layout.addWidget(title)
+        tb_layout.addWidget(title)
+        tb_layout.addStretch()
+        layout.addWidget(title_bar)
 
-        self.btn_nav_merge = QPushButton("合  并", objectName="navBtn")
-        self.btn_nav_edit = QPushButton("编  辑", objectName="navBtn")
-
-        for btn in [self.btn_nav_merge, self.btn_nav_edit]:
-            nav_layout.addWidget(btn)
-
-        self.btn_nav_merge.setProperty("active", "true")
-        self.btn_nav_merge.setStyleSheet(self._nav_style(True))
-        self.btn_nav_edit.setStyleSheet(self._nav_style(False))
-
-        self.btn_nav_merge.clicked.connect(lambda: self._switch_page(0))
-        self.btn_nav_edit.clicked.connect(lambda: self._switch_page(1))
-
-        nav_layout.addStretch()
-        layout.addWidget(nav_bar)
-
-        # ---- 页面栈 ----
-        self.stack = QStackedWidget()
-        self.merge_page = MergePage()
+        # ---- 编辑页面 ----
         self.edit_page = EditPage()
-        self.stack.addWidget(self.merge_page)
-        self.stack.addWidget(self.edit_page)
-        layout.addWidget(self.stack, stretch=1)
+        layout.addWidget(self.edit_page, stretch=1)
 
         # ---- 底部状态栏 ----
         status_bar = QWidget()
@@ -1166,22 +799,6 @@ class MainWindow(QMainWindow):
         MainWindow._status_label = self.status_label
         sb_layout.addWidget(self.status_label)
         layout.addWidget(status_bar)
-
-    def _nav_style(self, active):
-        color = "#409eff" if active else "#909399"
-        border = "2px solid #409eff" if active else "2px solid transparent"
-        return f"QPushButton {{ background: transparent; border: none; border-radius: 0; padding: 10px 24px; font-size: 14px; font-weight: bold; color: {color}; border-bottom: {border}; }} QPushButton:hover {{ color: #409eff; background: transparent; }}"
-
-    def _switch_page(self, index):
-        self.stack.setCurrentIndex(index)
-        self.btn_nav_merge.setStyleSheet(self._nav_style(index == 0))
-        self.btn_nav_edit.setStyleSheet(self._nav_style(index == 1))
-        self.btn_nav_merge.setProperty("active", str(index == 0).lower())
-        self.btn_nav_edit.setProperty("active", str(index == 1).lower())
-
-    # 供子页面调用的入口
-    def add_merge_files(self, paths):
-        self.merge_page.add_files(paths)
 
 
 # ==================== 入口 ====================

@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-Windows 桌面 PDF 工具，提供合并与编辑两大功能模块，PySide6 GUI + PyInstaller 打包为单文件 exe。
+Windows 桌面 PDF 工具，统一编辑界面完成 PDF 合并、编辑、导出，PySide6 GUI + PyInstaller 打包为单文件 exe。
 
 ## 技术栈
 
@@ -34,15 +34,11 @@ Windows 桌面 PDF 工具，提供合并与编辑两大功能模块，PySide6 GU
 
 ```
 MainWindow
-├── 导航栏 (合并 / 编辑切换)
-├── QStackedWidget
-│   ├── MergePage          # 合并模块
-│   │   ├── DropListWidget # 支持外部拖入 + 内部拖拽排序
-│   │   └── MergeWorker    # QThread 后台合并
-│   └── EditPage           # 编辑模块
-│       ├── PageEntry      # 数据模型（一页的元信息 + 缩略图缓存）
-│       ├── ThumbnailWidget# 单页缩略图控件（点击选中/取消）
-│       └── ExportWorker   # QThread 后台导出
+├── 标题栏 (应用名称)
+├── EditPage               # 统一编辑界面
+│   ├── PageEntry          # 数据模型（一页的元信息 + 缩略图缓存）
+│   ├── ThumbnailWidget    # 单页缩略图控件（点击选中/取消 + 拖拽排序）
+│   └── ExportWorker       # QThread 后台导出
 └── 底部状态栏
 ```
 
